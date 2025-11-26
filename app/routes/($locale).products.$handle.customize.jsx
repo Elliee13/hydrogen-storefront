@@ -4,6 +4,7 @@ import {useLoaderData} from 'react-router';
 
 /**
  * Loader: fetch the product by handle so we can show it in the customizer
+ * @param {{context: any, params: any}} args
  */
 export async function loader({context, params}) {
   const {handle} = params;
@@ -14,7 +15,9 @@ export async function loader({context, params}) {
   }
 
   const {product} = await storefront.query(PRODUCT_QUERY, {
-    variables: {handle},
+    variables: {
+      handle,
+    },
   });
 
   if (!product?.id) {
@@ -71,6 +74,13 @@ const PRODUCT_QUERY = `#graphql
 
 export default function CustomizeProduct() {
   const {product} = useLoaderData();
+  console.log('DEBUG customize:', {
+    selectedColor,
+    selectedSize,
+    quantity,
+    variants: product.variants?.nodes,
+  });
+
 
   // ----- derive options from product -----
   const sizeOption =
@@ -91,44 +101,56 @@ export default function CustomizeProduct() {
     ? colorOption.optionValues.map((v) => v.name)
     : [];
 
-  // ----- state for selections (DECLARED BEFORE ANY USE) -----
+  // ----- state for selections -----
   const [selectedSize, setSelectedSize] = useState(
-    sizeValues[0] || '',
+    () => sizeValues[0] || '',
   );
   const [selectedColor, setSelectedColor] = useState(
-    colorValues[0] || '',
+    () => colorValues[0] || '',
   );
   const [quantity, setQuantity] = useState(1);
   const [artPreview, setArtPreview] = useState(null);
 
-  // ----- helper: find matching variant -----
+  // ----- helper: find matching variant (more robust) -----
   const matchingVariant = product.variants?.nodes?.find((variant) => {
     const options = variant.selectedOptions || [];
 
-    const sizeOk =
-      !sizeOption ||
-      !selectedSize ||
+    const requirements = [];
+
+    if (colorOption && selectedColor) {
+      requirements.push({
+        name: colorOption.name,
+        value: selectedColor,
+      });
+    }
+
+    if (sizeOption && selectedSize) {
+      requirements.push({
+        name: sizeOption.name,
+        value: selectedSize,
+      });
+    }
+
+    // Every required (name, value) pair must exist in the variant's options (case-insensitive)
+    return requirements.every((req) =>
       options.some(
         (opt) =>
-          opt.name.toLowerCase() === 'size' &&
-          opt.value === selectedSize,
-      );
-
-    const colorOk =
-      !colorOption ||
-      !selectedColor ||
-      options.some(
-        (opt) =>
-          opt.name.toLowerCase() === 'color' &&
-          opt.value === selectedColor,
-      );
-
-    return sizeOk && colorOk;
+          opt.name.toLowerCase() === req.name.toLowerCase() &&
+          opt.value.toLowerCase() === req.value.toLowerCase(),
+      ),
+    );
   });
+
+    // Quick debug: log the first variant's options in the browser console
+  if (typeof window !== 'undefined') {
+    console.log('First variant options:', product.variants?.nodes?.[0]?.selectedOptions);
+  }
+
 
   function handleArtUpload(event) {
     const file = event.target.files?.[0];
     if (!file) return;
+
     const url = URL.createObjectURL(file);
     setArtPreview(url);
   }
@@ -144,24 +166,25 @@ export default function CustomizeProduct() {
       <h1 className="text-3xl font-bold mb-2">
         Customize: {product.title}
       </h1>
-      <p className="text-sm text-gray-500 mb-4">
-        Choose your options, upload your artwork, and preview it on the garment.
+      <p className="text-sm text-gray-500 mb-6">
+        Choose your options, upload your artwork, and preview it on the
+        garment.
       </p>
 
-      {/* DEBUG BLOCK placed after state + matchingVariant, so no TDZ */}
-      <section className="mb-6 rounded border border-dashed border-red-500 bg-red-50 p-4 text-sm text-red-900 space-y-1">
-        <p>
-          <strong>DEBUG – Selected:</strong>{' '}
-          {selectedColor || 'No color'} / {selectedSize || 'No size'} – Qty:{' '}
-          {quantity}
-        </p>
-        <p>
-          <strong>DEBUG – Matching variant:</strong>{' '}
-          {matchingVariant
-            ? `${matchingVariant.title} (${matchingVariant.id})`
-            : 'None found (check options)'}
-        </p>
-      </section>
+        {/* Debug info about current selection + variant */}
+            <section className="mt-2 rounded border border-dashed border-gray-300 bg-gray-50 p-3 text-xs text-gray-700 space-y-1">
+            <p>
+                <strong>Selected:</strong>{' '}
+                {selectedColor || 'No color'} / {selectedSize || 'No size'} – Qty:{' '}
+                {quantity}
+            </p>
+            <p>
+                <strong>Matching variant:</strong>{' '}
+                {matchingVariant
+                ? `${matchingVariant.title} (${matchingVariant.id})`
+                : 'None found (check options)'}
+            </p>
+        </section>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         {/* LEFT: mockup / preview */}
@@ -187,7 +210,7 @@ export default function CustomizeProduct() {
 
         {/* RIGHT: options & upload */}
         <div className="space-y-6">
-          {/* Color section – clickable buttons */}
+          {/* Color section – real clickable buttons */}
           <section>
             <h2 className="font-semibold mb-2">Choose Color</h2>
 
@@ -279,6 +302,7 @@ export default function CustomizeProduct() {
               className="w-full mt-2 py-2 rounded-2xl bg-black text-white text-sm font-medium disabled:opacity-50"
               type="button"
               disabled={!matchingVariant}
+              // onClick={() => ... next step: add to cart }
             >
               Add Customized Product to Cart (coming soon)
             </button>
